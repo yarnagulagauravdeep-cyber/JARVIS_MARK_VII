@@ -1,4 +1,6 @@
 @echo off
+setlocal
+cd /d "%~dp0"
 title J.A.R.V.I.S Mark VII - Server Engine
 echo ========================================================
 echo   J.A.R.V.I.S Mark VII - Initializing System...
@@ -8,11 +10,9 @@ echo.
 :: Clear Python cache
 if exist __pycache__ rd /s /q __pycache__ >nul 2>&1
 
-:: Activate virtual environment if valid
+:: Activate virtual environment
 if exist venv\Scripts\activate.bat (
     call venv\Scripts\activate.bat
-) else if exist .venv\Scripts\activate.bat (
-    call .venv\Scripts\activate.bat
 )
 
 :: Free port 8000 if occupied by a previous process
@@ -31,3 +31,11 @@ echo ========================================================
 echo.
 
 python jarvis_server.py
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo ========================================================
+    echo   [ERROR] Jarvis server stopped unexpectedly.
+    echo ========================================================
+    echo.
+    pause
+)
