@@ -1,12 +1,11 @@
 @echo off
-title J.A.R.V.I.S Mark VII - Executive HUD
+title J.A.R.V.I.S Mark VII - Server Engine
 echo ========================================================
-echo   Starting J.A.R.V.I.S Mark VII Server...
+echo   J.A.R.V.I.S Mark VII - Initializing System...
 echo ========================================================
 echo.
 
-:: Clean up any orphan server processes and cache
-taskkill /f /im python.exe >nul 2>&1
+:: Clear Python cache
 if exist __pycache__ rd /s /q __pycache__ >nul 2>&1
 
 :: Activate virtual environment if valid
@@ -16,23 +15,19 @@ if exist venv\Scripts\activate.bat (
     call .venv\Scripts\activate.bat
 )
 
-:: Start server in background
-start /b python jarvis_server.py
+:: Free port 8000 if occupied by a previous process
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000') do (
+    taskkill /f /pid %%a >nul 2>&1
+)
 
-:: Give server 2 seconds to bind port 8000
-timeout /t 2 /nobreak >nul
+:: Launch browser in 2 seconds in background
+start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; $rnd = Get-Random; Start-Process 'http://127.0.0.1:8000/?fresh=' + $rnd"
 
-:: Open browser with unique fresh URL to bypass any stale browser cache
-start http://localhost:8000/?fresh=%random%
-
-echo.
 echo ========================================================
-echo   J.A.R.V.I.S is LIVE and running on http://localhost:8000
-echo   - Click anywhere on the browser screen to engage voice.
-echo   - Just speak aloud naturally anytime.
-echo   - Press any key in this window to stop Jarvis.
+echo   J.A.R.V.I.S Server is running on http://127.0.0.1:8000
+echo   - Keep this window open while using Jarvis
+echo   - Close this window or press Ctrl+C to stop Jarvis
 echo ========================================================
 echo.
 
-pause >nul
-taskkill /f /im python.exe >nul 2>&1
+python jarvis_server.py
