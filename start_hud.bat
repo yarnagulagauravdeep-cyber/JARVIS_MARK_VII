@@ -9,8 +9,12 @@ echo.
 taskkill /f /im python.exe >nul 2>&1
 if exist __pycache__ rd /s /q __pycache__ >nul 2>&1
 
-:: Activate virtual environment
-call .venv\Scripts\activate.bat
+:: Activate virtual environment if valid
+if exist venv\Scripts\activate.bat (
+    call venv\Scripts\activate.bat
+) else if exist .venv\Scripts\activate.bat (
+    call .venv\Scripts\activate.bat
+)
 
 :: Start server in background
 start /b python jarvis_server.py

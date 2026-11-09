@@ -381,7 +381,10 @@ html, body {
     <div class="panel grow">
       <h2>
         <span>COMMUNICATIONS STREAM</span>
-        <button type="button" id="btn-clear-chat" class="clear-btn" title="Clear chat history and start fresh">CLEAR &amp; NEW</button>
+        <div style="display:flex; gap:6px;">
+          <button type="button" id="btn-test-voice" class="clear-btn" title="Test Voice Output">🔊 VOICE TEST</button>
+          <button type="button" id="btn-clear-chat" class="clear-btn" title="Clear chat history and start fresh">CLEAR &amp; NEW</button>
+        </div>
       </h2>
       <div id="chat"></div>
       <form id="chat-form" class="chat-prompt">
@@ -475,48 +478,125 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
-/* ---------- In-Browser Natural Voice Synthesis ---------- */
-function speakInBrowser(text) {
-  if (!('speechSynthesis' in window)) return;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    u.pitch = 0.98;
+/* ---------- Cross-Browser Text-to-Speech Engine (Firefox & Chromium) ---------- */
+let activeUtterance = null;
+let lastSpokenText = '';
+let lastSpokenTime = 0;
+let cachedVoices = [];
 
-    const voices = window.speechSynthesis.getVoices();
-    for (const v of voices) {
-      if (v.lang.startsWith('en') && (v.name.includes('David') || v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Mark') || v.name.includes('Zira'))) {
-        u.voice = v;
-        break;
-      }
+function loadVoices() {
+  if (!('speechSynthesis' in window)) return [];
+  cachedVoices = window.speechSynthesis.getVoices() || [];
+  return cachedVoices;
+}
+
+if ('speechSynthesis' in window) {
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    loadVoices();
+  };
+}
+
+function speakInBrowser(text) {
+  if (!text || !('speechSynthesis' in window)) return;
+
+  const clean = text.trim();
+  if (!clean) return;
+
+  // Deduplication: prevent repeat triggers of identical text within 3 seconds
+  const now = Date.now();
+  if (clean === lastSpokenText && (now - lastSpokenTime) < 3000) {
+    return;
+  }
+  lastSpokenText = clean;
+  lastSpokenTime = now;
+
+  try {
+    // Unfreeze synthesis if paused (vital in Firefox)
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
     }
 
-    u.onstart = () => {
-      isJarvisSpeaking = true;
-      if (recognition) {
-        try { recognition.abort(); } catch(e) {}
-      }
-    };
+    // Only cancel if actively speaking
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
 
-    u.onend = () => {
-      isJarvisSpeaking = false;
-      setTimeout(() => {
-        if (continuousVoice && recognition) {
-          try { recognition.start(); } catch(e) {}
+    setTimeout(() => {
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
         }
-      }, 350);
-    };
 
-    u.onerror = () => {
-      isJarvisSpeaking = false;
-      if (continuousVoice && recognition) {
-        try { recognition.start(); } catch(e) {}
+        const u = new SpeechSynthesisUtterance(clean);
+        u.lang = 'en-US';
+        u.rate = 1.0;
+        u.pitch = 1.0;
+        u.volume = 1.0;
+
+        // Prioritize natural English voices
+        const voices = cachedVoices.length ? cachedVoices : loadVoices();
+        if (voices && voices.length) {
+          let chosen = voices.find(v => v.lang && v.lang.startsWith('en') && (
+            v.name.includes('David') || v.name.includes('Natural') || v.name.includes('Google') ||
+            v.name.includes('Mark') || v.name.includes('George') || v.name.includes('Zira')
+          ));
+          if (!chosen) {
+            chosen = voices.find(v => v.lang && v.lang.startsWith('en'));
+          }
+          if (chosen) {
+            u.voice = chosen;
+          }
+        }
+
+        u.onstart = () => {
+          isJarvisSpeaking = true;
+          if (recognition) {
+            try { recognition.abort(); } catch(e) {}
+          }
+        };
+
+        const onFinished = () => {
+          isJarvisSpeaking = false;
+          activeUtterance = null;
+          window._jarvisUtterance = null;
+          setTimeout(() => {
+            if (continuousVoice && recognition) {
+              try { recognition.start(); } catch(e) {}
+            }
+          }, 350);
+        };
+
+        u.onend = onFinished;
+        u.onerror = (e) => {
+          console.warn('Speech synthesis notice:', e);
+          onFinished();
+        };
+
+        // Retain global reference to bypass Firefox GC bug (Bugzilla 1461875)
+        activeUtterance = u;
+        window._jarvisUtterance = u;
+
+        window.speechSynthesis.speak(u);
+
+        // Keep Firefox speaking active
+        const heartbeat = setInterval(() => {
+          if (!window.speechSynthesis.speaking) {
+            clearInterval(heartbeat);
+          } else if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+        }, 300);
+
+      } catch(err) {
+        console.error('TTS execution error:', err);
+        isJarvisSpeaking = false;
       }
-    };
+    }, 40);
 
-    window.speechSynthesis.speak(u);
-  } catch(e) {}
+  } catch(e) {
+    console.error('Speech setup error:', e);
+  }
 }
 
 /* ---------- Command Execution ---------- */
@@ -556,6 +636,13 @@ if (chatForm) {
       sendCommand(inp.value.trim());
       inp.value = '';
     }
+  });
+}
+
+const voiceTestBtn = $('#btn-test-voice');
+if (voiceTestBtn) {
+  voiceTestBtn.addEventListener('click', () => {
+    speakInBrowser("Voice synthesis online. Systems fully operational.");
   });
 }
 
@@ -601,7 +688,13 @@ let speechDebounceTimer = null;
 function initContinuousSpeech() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    console.warn('SpeechRecognition API not available.');
+    console.warn('SpeechRecognition API not available in this browser.');
+    const cb = $('#chat');
+    if (cb && !$('#ff-mic-notice')) {
+      const hint = el('div', 'm sys', 'NOTICE: Firefox does not support Web Speech Recognition by default. Type your commands in the prompt below, or use Google Chrome / Microsoft Edge for hands-free microphone listening.');
+      hint.id = 'ff-mic-notice';
+      cb.append(hint);
+    }
     return;
   }
 
@@ -668,7 +761,20 @@ const overlay = $('#init-overlay');
 function engageJarvis() {
   overlay.classList.add('hidden');
   initContinuousSpeech();
-  if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
+  loadVoices();
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.resume();
+    try {
+      const prime = new SpeechSynthesisUtterance(' ');
+      prime.volume = 0.01;
+      window.speechSynthesis.speak(prime);
+    } catch(e) {}
+    setTimeout(() => {
+      speakInBrowser("Good day, sir. All systems are operational.");
+    }, 250);
+  }
+  const inp = $('#cmd-input');
+  if (inp) inp.focus();
 }
 overlay.addEventListener('click', engageJarvis);
 document.body.addEventListener('keydown', () => {
@@ -792,7 +898,7 @@ function render(j) {
         header.append(el('small', '', m.t));
         d.append(header, document.createTextNode(m.x));
         cb.append(d);
-        if (m.k === 'jarvis' && seenChat > 2 && !window.speechSynthesis.speaking) {
+        if (m.k === 'jarvis' && seenChat > 2 && m.x !== lastSpokenText) {
           speakInBrowser(m.x);
         }
       }
